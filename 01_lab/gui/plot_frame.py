@@ -1,5 +1,5 @@
 """
-Виджет для отображения графика с поддержкой масштабирования
+Виджет для отображения графика с поддержкой масштабирования и полосами прокрутки
 """
 import customtkinter as ctk
 from matplotlib.figure import Figure
@@ -51,7 +51,7 @@ class PlotFrame(ctk.CTkFrame):
             self.controls_frame,
             from_=0.0001,
             to=10000.0,
-            number_of_steps=1000,  # 1000 шагов для точной настройки
+            number_of_steps=1000,
             command=self._on_zoom_slider
         )
         self.zoom_scale.set(1.0)
@@ -65,7 +65,13 @@ class PlotFrame(ctk.CTkFrame):
         )
         self.zoom_label.grid(row=0, column=4, padx=5)
         
-        # Создание графика
+        # Создание контейнера для графика со scrollbars
+        self.plot_container = ctk.CTkFrame(self)
+        self.plot_container.grid(row=1, column=0, sticky="nsew")
+        self.plot_container.grid_rowconfigure(0, weight=1)
+        self.plot_container.grid_columnconfigure(0, weight=1)
+        
+        # Canvas для графика
         self.figure = Figure(figsize=(8, 6), dpi=100, facecolor="#1a1a2e")
         self.ax = self.figure.add_subplot(111)
         self.ax.set_facecolor("#16213e")
@@ -78,8 +84,29 @@ class PlotFrame(ctk.CTkFrame):
         self.ax.xaxis.label.set_color("#ffffff")
         self.ax.yaxis.label.set_color("#ffffff")
         
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self)
-        self.canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.plot_container)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        
+        # Создание полос прокрутки
+        # Вертикальная полоса прокрутки
+        self.v_scrollbar = ctk.CTkScrollbar(
+            self.plot_container,
+            orientation="vertical",
+            command=self._on_vscroll
+        )
+        self.v_scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        # Горизонтальная полоса прокрутки
+        self.h_scrollbar = ctk.CTkScrollbar(
+            self.plot_container,
+            orientation="horizontal",
+            command=self._on_hscroll
+        )
+        self.h_scrollbar.grid(row=1, column=0, sticky="ew")
+        
+        # Привязка событий для обновления scrollbar
+        self.canvas.mpl_connect('axes_enter_event', self._update_scrollbars)
+        self.canvas.mpl_connect('axes_leave_event', self._update_scrollbars)
         
         # Настройка взаимодействия с мышью
         self._setup_interaction()
@@ -95,8 +122,19 @@ class PlotFrame(ctk.CTkFrame):
         self.current_center_x = 0
         self.current_center_y = 0
         
+        # Состояние прокрутки
+        self.scroll_position_x = 0.5  # 0-1
+        self.scroll_position_y = 0.5  # 0-1
+        
+        # Хранение полного диапазона для прокрутки
+        self.full_x_range = None
+        self.full_y_range = None
+        
         # Привязка событий мыши для панорамирования
         self._bind_mouse_events()
+        
+        # Обновление scrollbars после отрисовки
+        self.after(100, self._update_scrollbars)
     
     def _setup_interaction(self):
         """Настройка интерактивности"""
@@ -151,6 +189,9 @@ class PlotFrame(ctk.CTkFrame):
         self.current_center_x = (new_xlim[0] + new_xlim[1]) / 2
         self.current_center_y = (new_ylim[0] + new_ylim[1]) / 2
         
+        # Обновляем позицию скроллбаров
+        self._update_scroll_positions()
+        
         self.canvas.draw()
     
     def _on_scroll(self, event):
@@ -158,14 +199,12 @@ class PlotFrame(ctk.CTkFrame):
         if event.inaxes != self.ax:
             return
         
-        # Коэффициент масштабирования (логарифмическая шкала для плавности)
+        # Коэффициент масштабирования
         if event.button == 'up':
-            # Увеличение
             self.zoom_factor *= 1.1
             if self.zoom_factor > 10000:
                 self.zoom_factor = 10000
         else:
-            # Уменьшение
             self.zoom_factor /= 1.1
             if self.zoom_factor < 0.0001:
                 self.zoom_factor = 0.0001
@@ -177,15 +216,13 @@ class PlotFrame(ctk.CTkFrame):
         self.zoom_scale.set(self.zoom_factor)
         self._update_zoom_label()
         
+        # Обновляем позицию скроллбаров
+        self._update_scroll_positions()
+        
         self.canvas.draw()
     
     def _apply_zoom(self, zoom_factor):
-        """
-        Применение масштабирования с коэффициентом zoom_factor
-        zoom_factor = 1 - исходный масштаб
-        zoom_factor > 1 - увеличение
-        zoom_factor < 1 - уменьшение
-        """
+        """Применение масштабирования с коэффициентом zoom_factor"""
         if not self.is_data_plotted or self.base_x_range is None:
             return
         
@@ -228,13 +265,11 @@ class PlotFrame(ctk.CTkFrame):
             elif self.zoom_factor >= 1000:
                 self.zoom_label.configure(text=f"{int(self.zoom_factor)}x")
             else:
-                # Для чисел от 1 до 999 показываем с округлением
                 if self.zoom_factor == int(self.zoom_factor):
                     self.zoom_label.configure(text=f"{int(self.zoom_factor)}x")
                 else:
                     self.zoom_label.configure(text=f"{self.zoom_factor:.1f}x")
         else:
-            # Для уменьшения показываем как дробь
             if self.zoom_factor <= 0.0001:
                 self.zoom_label.configure(text="0.0001x")
             elif self.zoom_factor <= 0.001:
@@ -252,6 +287,10 @@ class PlotFrame(ctk.CTkFrame):
         self.zoom_factor = value
         self._apply_zoom(value)
         self._update_zoom_label()
+        
+        # Обновляем позицию скроллбаров
+        self._update_scroll_positions()
+        
         self.canvas.draw()
     
     def zoom_in(self):
@@ -261,6 +300,7 @@ class PlotFrame(ctk.CTkFrame):
         self.zoom_scale.set(new_value)
         self._apply_zoom(new_value)
         self._update_zoom_label()
+        self._update_scroll_positions()
         self.canvas.draw()
     
     def zoom_out(self):
@@ -270,6 +310,7 @@ class PlotFrame(ctk.CTkFrame):
         self.zoom_scale.set(new_value)
         self._apply_zoom(new_value)
         self._update_zoom_label()
+        self._update_scroll_positions()
         self.canvas.draw()
     
     def reset_view(self):
@@ -285,7 +326,151 @@ class PlotFrame(ctk.CTkFrame):
             self.zoom_factor = 1.0
             self.zoom_scale.set(1.0)
             self.zoom_label.configure(text="1x")
+            
+            # Сбрасываем позицию скроллбаров
+            self.scroll_position_x = 0.5
+            self.scroll_position_y = 0.5
+            self._update_scrollbars()
+            
             self.canvas.draw()
+    
+    def _update_scroll_positions(self):
+        """Обновление позиций скроллбаров на основе текущего вида"""
+        if not self.is_data_plotted or self.full_x_range is None:
+            return
+        
+        # Получаем текущие пределы
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        # Вычисляем позицию скроллбара по X (0-1)
+        x_range = self.full_x_range[1] - self.full_x_range[0]
+        if x_range > 0:
+            x_center = (xlim[0] + xlim[1]) / 2
+            self.scroll_position_x = (x_center - self.full_x_range[0]) / x_range
+            # Ограничиваем от 0 до 1
+            self.scroll_position_x = max(0, min(1, self.scroll_position_x))
+        
+        # Вычисляем позицию скроллбара по Y (0-1)
+        y_range = self.full_y_range[1] - self.full_y_range[0]
+        if y_range > 0:
+            y_center = (ylim[0] + ylim[1]) / 2
+            self.scroll_position_y = (y_center - self.full_y_range[0]) / y_range
+            # Ограничиваем от 0 до 1
+            self.scroll_position_y = max(0, min(1, self.scroll_position_y))
+        
+        # Обновляем скроллбары
+        self._update_scrollbars()
+    
+    def _update_scrollbars(self, event=None):
+        """Обновление состояния скроллбаров"""
+        if not self.is_data_plotted or self.full_x_range is None:
+            # Скрываем скроллбары, если данных нет
+            self.v_scrollbar.grid_remove()
+            self.h_scrollbar.grid_remove()
+            return
+        
+        # Показываем скроллбары
+        self.v_scrollbar.grid()
+        self.h_scrollbar.grid()
+        
+        # Вычисляем размер видимой области (отношение видимого к полному)
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        x_visible = (xlim[1] - xlim[0]) / (self.full_x_range[1] - self.full_x_range[0])
+        y_visible = (ylim[1] - ylim[0]) / (self.full_y_range[1] - self.full_y_range[0])
+        
+        # Ограничиваем размер (чтобы не было меньше минимального)
+        x_visible = max(0.01, min(1.0, x_visible))
+        y_visible = max(0.01, min(1.0, y_visible))
+        
+        # Обновляем скроллбары
+        self.h_scrollbar.set(self.scroll_position_x - x_visible/2, 
+                            self.scroll_position_x + x_visible/2)
+        self.v_scrollbar.set(self.scroll_position_y - y_visible/2, 
+                            self.scroll_position_y + y_visible/2)
+    
+    def _on_hscroll(self, *args):
+        """Обработка горизонтальной прокрутки"""
+        if not self.is_data_plotted or self.full_x_range is None:
+            return
+        
+        # Получаем позицию из скроллбара
+        if args:
+            try:
+                # args может быть ('moveto', позиция) или ('scroll', шаг, 'units')
+                if args[0] == 'moveto':
+                    self.scroll_position_x = float(args[1])
+                elif args[0] == 'scroll':
+                    step = float(args[1])
+                    if args[2] == 'units':
+                        self.scroll_position_x += step * 0.05
+                    elif args[2] == 'pages':
+                        self.scroll_position_x += step * 0.5
+                    self.scroll_position_x = max(0, min(1, self.scroll_position_x))
+            except:
+                pass
+        
+        # Обновляем вид
+        x_range = self.full_x_range[1] - self.full_x_range[0]
+        current_xlim = self.ax.get_xlim()
+        x_width = current_xlim[1] - current_xlim[0]
+        
+        # Новый центр X
+        new_center_x = self.full_x_range[0] + self.scroll_position_x * x_range
+        
+        # Новые пределы
+        new_xlim = [new_center_x - x_width/2, new_center_x + x_width/2]
+        
+        # Обновляем центр
+        self.current_center_x = new_center_x
+        
+        # Применяем новые пределы
+        self.ax.set_xlim(new_xlim)
+        
+        self._update_scrollbars()
+        self.canvas.draw()
+    
+    def _on_vscroll(self, *args):
+        """Обработка вертикальной прокрутки"""
+        if not self.is_data_plotted or self.full_y_range is None:
+            return
+        
+        # Получаем позицию из скроллбара
+        if args:
+            try:
+                if args[0] == 'moveto':
+                    self.scroll_position_y = float(args[1])
+                elif args[0] == 'scroll':
+                    step = float(args[1])
+                    if args[2] == 'units':
+                        self.scroll_position_y += step * 0.05
+                    elif args[2] == 'pages':
+                        self.scroll_position_y += step * 0.5
+                    self.scroll_position_y = max(0, min(1, self.scroll_position_y))
+            except:
+                pass
+        
+        # Обновляем вид
+        y_range = self.full_y_range[1] - self.full_y_range[0]
+        current_ylim = self.ax.get_ylim()
+        y_height = current_ylim[1] - current_ylim[0]
+        
+        # Новый центр Y
+        new_center_y = self.full_y_range[0] + self.scroll_position_y * y_range
+        
+        # Новые пределы
+        new_ylim = [new_center_y - y_height/2, new_center_y + y_height/2]
+        
+        # Обновляем центр
+        self.current_center_y = new_center_y
+        
+        # Применяем новые пределы
+        self.ax.set_ylim(new_ylim)
+        
+        self._update_scrollbars()
+        self.canvas.draw()
     
     def plot_function(self, func, x_min=-10, x_max=10, formula=""):
         """Построение графика функции"""
@@ -298,8 +483,7 @@ class PlotFrame(ctk.CTkFrame):
         self.ax.axvline(x=0, color="#ffffff", alpha=0.5, linewidth=0.8)
         self.ax.tick_params(colors="#ffffff")
         
-        # Генерация точек с высоким разрешением для детального отображения
-        # При большом увеличении нужно больше точек
+        # Генерация точек с высоким разрешением
         x = np.linspace(x_min, x_max, 10000)
         y = np.array([func(xi) for xi in x])
         
@@ -316,6 +500,10 @@ class PlotFrame(ctk.CTkFrame):
         self.ax.set_xlim(x_min, x_max)
         self.ax.set_ylim(y_min, y_max)
         
+        # Сохраняем полные диапазоны для прокрутки
+        self.full_x_range = (x_min, x_max)
+        self.full_y_range = (y_min, y_max)
+        
         self.base_x_range = (x_min, x_max)
         self.base_y_range = (y_min, y_max)
         self.is_data_plotted = True
@@ -324,16 +512,27 @@ class PlotFrame(ctk.CTkFrame):
         self.current_center_x = (x_min + x_max) / 2
         self.current_center_y = (y_min + y_max) / 2
         
+        # Сбрасываем позицию скроллбаров
+        self.scroll_position_x = 0.5
+        self.scroll_position_y = 0.5
+        
         self.zoom_factor = 1.0
         self.zoom_scale.set(1.0)
         self.zoom_label.configure(text="1x")
+        
+        # Обновляем скроллбары
+        self._update_scrollbars()
         
         self.canvas.draw()
     
     def _get_good_y_range(self, y, x_min, x_max):
         """Получение хорошего диапазона для Y с учетом масштаба"""
-        y_min = np.min(y)
-        y_max = np.max(y)
+        y_valid = y[np.isfinite(y)]
+        if len(y_valid) == 0:
+            return (-1, 1)
+        
+        y_min = np.min(y_valid)
+        y_max = np.max(y_valid)
         
         # Добавляем отступы
         y_range = y_max - y_min
@@ -384,20 +583,36 @@ class PlotFrame(ctk.CTkFrame):
         x_margin = max((x_max - x_min) * 0.1, 0.5)
         y_margin = max((y_max - y_min) * 0.1, 0.5)
         
-        self.ax.set_xlim(x_min - x_margin, x_max + x_margin)
-        self.ax.set_ylim(y_min - y_margin, y_max + y_margin)
+        x_min_plot = x_min - x_margin
+        x_max_plot = x_max + x_margin
+        y_min_plot = y_min - y_margin
+        y_max_plot = y_max + y_margin
         
-        self.base_x_range = (x_min - x_margin, x_max + x_margin)
-        self.base_y_range = (y_min - y_margin, y_max + y_margin)
+        self.ax.set_xlim(x_min_plot, x_max_plot)
+        self.ax.set_ylim(y_min_plot, y_max_plot)
+        
+        # Сохраняем полные диапазоны для прокрутки
+        self.full_x_range = (x_min_plot, x_max_plot)
+        self.full_y_range = (y_min_plot, y_max_plot)
+        
+        self.base_x_range = (x_min_plot, x_max_plot)
+        self.base_y_range = (y_min_plot, y_max_plot)
         self.is_data_plotted = True
         
         # Сохраняем центр
-        self.current_center_x = (self.base_x_range[0] + self.base_x_range[1]) / 2
-        self.current_center_y = (self.base_y_range[0] + self.base_y_range[1]) / 2
+        self.current_center_x = (x_min_plot + x_max_plot) / 2
+        self.current_center_y = (y_min_plot + y_max_plot) / 2
+        
+        # Сбрасываем позицию скроллбаров
+        self.scroll_position_x = 0.5
+        self.scroll_position_y = 0.5
         
         self.zoom_factor = 1.0
         self.zoom_scale.set(1.0)
         self.zoom_label.configure(text="1x")
+        
+        # Обновляем скроллбары
+        self._update_scrollbars()
         
         self.canvas.draw()
     
@@ -414,11 +629,17 @@ class PlotFrame(ctk.CTkFrame):
         
         self.base_x_range = None
         self.base_y_range = None
+        self.full_x_range = None
+        self.full_y_range = None
         self.is_data_plotted = False
         self.current_center_x = 0
         self.current_center_y = 0
         self.zoom_factor = 1.0
         self.zoom_scale.set(1.0)
         self.zoom_label.configure(text="1x")
+        
+        # Скрываем скроллбары
+        self.v_scrollbar.grid_remove()
+        self.h_scrollbar.grid_remove()
         
         self.canvas.draw()
