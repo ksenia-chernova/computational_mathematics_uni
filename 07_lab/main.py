@@ -1,4 +1,5 @@
 import math
+from scipy.integrate import quad
 
 def f(x):
     """f(x) = (x - 2.5) * cos(3*pi*x) / (x - 1.5)"""
@@ -61,4 +62,7 @@ if __name__ == "__main__":
     print(f"  Значение интеграла : {result:.10f}")
     print(f"  Оценка погрешности : {error:.2e}")
     print(f"  Количество узлов   : {nodes}")
-    print(f"  Количество итераций: {iterations}")
+    print(f"  Количество итераций: {iterations}\n")
+
+    print("Сравнение с готовым решением\n")
+    print(f"{quad(f, a, b)}")
