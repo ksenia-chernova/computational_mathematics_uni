@@ -12,9 +12,9 @@ def f(x):
 # ─────────────────────────────────────────────
 def generate_nodes(a, b, n_nodes, exclude_point=1.5, exclude_radius=0.1):
     """
-    Генерация равномерно распределённых узлов, избегая окрестности разрыва.
+    Генерация равномерно распределённых узлов
     """
-    # Создаём плотную сетку
+    # Создаём сетку
     x_dense = np.linspace(a, b, 10000)
     
     # Исключаем окрестность разрыва
@@ -27,8 +27,8 @@ def generate_nodes(a, b, n_nodes, exclude_point=1.5, exclude_radius=0.1):
     
     return x_nodes
 
-# Задаём узлы интерполяции (20 узлов, избегаем x = 1.5)
-n_nodes = 20
+# Задаём узлы интерполяции (3 узла, избегаем x = 1.5)
+n_nodes = 3
 x_nodes = generate_nodes(0.1, 4.0, n_nodes, exclude_point=1.5, exclude_radius=0.1)
 y_nodes = f(x_nodes)
 
@@ -62,7 +62,7 @@ def newton_interpolation(x_nodes, dd, x_val):
     return result
 
 # ─────────────────────────────────────────────
-# Построение многочленов различной степени (от 1 до 50)
+# Построение многочленов различной степени (от 1 до max_degree)
 # и вычисление СКО
 # ─────────────────────────────────────────────
 # Точки для проверки СКО
@@ -112,7 +112,7 @@ plt.figure(figsize=(14, 8))
 plt.plot(x_plot, y_original, 'b-', linewidth=2, label='Исходная функция f(x)')
 
 # Интерполяционный многочлен Ньютона — красный
-plt.plot(x_plot, y_newton, 'r--', linewidth=2, label=f'Многочлен Ньютона (степень {max_degree})')
+plt.plot(x_plot, y_newton, 'r--', linewidth=2, label=f'Многочлен Ньютона')
 
 # Узловые точки — зелёные звёздочки
 plt.plot(x_nodes, y_nodes, 'g*', markersize=12, label='Узловые точки')
@@ -134,16 +134,18 @@ plt.grid(True, alpha=0.3)
 plt.axvline(x=1.5, color='gray', linestyle=':', alpha=0.5, label='Разрыв x=1.5')
 plt.tight_layout()
 
-# ─────────────────────────────────────────────
-# Вывод значения многочлена в произвольной точке
-# ─────────────────────────────────────────────
-print(f"\nЗначение многочлена Ньютона в точке x = {x_arbitrary}:")
+
+print(f"\nЗначение многочлена Ньютона в произвольной точке x = {x_arbitrary}:")
 print(f"  N({x_arbitrary}) = {y_arbitrary_newton:.6f}")
 print(f"  f({x_arbitrary}) = {y_arbitrary_true:.6f}")
 print(f"  Погрешность      = {abs(y_arbitrary_newton - y_arbitrary_true):.6f}")
 
-print("\nСКО для каждой степени:")
-for deg, rms in rms_values.items():
-    print(f"  Степень {deg}: СКО = {rms:.6f}")
+print(f"{'x':<10} {'f(x)':<20} {'N(x)':<20}")
+print("-" * 70)
+for i, x_val in enumerate(x_nodes):
+    fx = f(x_val)
+    nx = newton_interpolation(x_nodes, dd_full, x_val)
+    err = abs(fx - nx)
+    print(f"{x_val:<10.4f} {fx:<20.6f} {nx:<20.6f}")
 
 plt.show()
